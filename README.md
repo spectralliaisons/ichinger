@@ -3,6 +3,7 @@ Jarble a poem into an I Ching hexagram.
 
 Like so:
 
+```
 sguided them into thehem into t  vcavscriptures only our fingers
 ' tips can reade of your flesh.  wouldwouldmost delicate youryou
 r temple birds would poin the s  tmy most deliif yinourcate bird
@@ -62,3 +63,4 @@ lumination.all of my most delicate birds,i guided them into the
 cave ofdyour flesh.sometimes one would escape.i would imitate th
 e sound:have you seen this bird?it is a memory of starlight.it i
 s the wave's slow descent to uniformity.but you had not seen it.
+```
