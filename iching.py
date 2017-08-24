@@ -1,10 +1,64 @@
 import numpy as np
-import re
-import svgwrite
-from PIL import Image
-from PIL import ImageFont
-from PIL import ImageDraw
 import cairocffi as cairo
+import re, datetime
+
+# this actually runs the damn thing
+def consult(poem, final_txt, title, config, render):
+    
+    n_rows = len(config["hexagram"]) * config["hexagram_line_break"]
+    n_chars = n_rows * config["n_cols"]
+    
+    # get enough random characters that we need, ensuring all are in fact present
+    scattered_poem = get_rand_segments(poem, n_chars)
+
+    # whatever text is at end will be ensured to be final text
+    scattered_poem = unjarble(scattered_poem, poem, config["n_unjarble_reps"]) + final_txt 
+
+    # form into final shape
+    scattered_poem = reshape(scattered_poem, n_rows, config["n_cols"], config["hexagram_vert_gap"], config["hexagram_line_break"], config["hexagram"])
+    
+    # form into cave w/ birds
+    scattered_poem = as_cave(scattered_poem, config["n_cols"], config["hexagram"], config["hexagram_line_break"])
+    
+    if render:
+        surface = draw(scattered_poem, title, config)
+        surface.write_to_png("out/" + title + "_" + str(datetime.datetime.now()) + ".png")
+    
+    return scattered_poem
+
+# draw with Cairo
+def draw(s, title, config):
+    
+    # setup a place to draw
+    surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, config["size"][0], config["size"][1])
+    ctx = cairo.Context (surface)
+
+    # paint background
+    ctx.set_source_rgb(1, 1, 1)
+    ctx.rectangle(0, 0, config["size"][0], config["size"][1])
+    ctx.fill()
+
+    # draw text
+    ctx.select_font_face(config["font"])
+    ctx.set_font_size(config["font_size"])
+    ctx.set_source_rgb(0,0,0)
+    
+    lines = get_lines(s)
+    
+    # title
+    xbearing, ybearing, width, height, xadvance, yadvance = ctx.text_extents(title)
+    ctx.move_to(config["size"][0]/2 - width/2, config["size"][1]/2 - (config["font_size"]*len(lines))/2 - config["font_size"]*2)
+    ctx.show_text(title)
+    
+    # we have to position each line individually :(
+    for line, i in zip(lines, np.arange(len(lines))):
+        xbearing, ybearing, width, height, xadvance, yadvance = ctx.text_extents(line)
+        print(line)
+        ctx.move_to(config["size"][0]/2 - width/2, config["size"][1]/2 - (config["font_size"]*len(lines))/2 + i * config["font_size"])
+        ctx.show_text(line)
+
+    ctx.stroke()
+    return surface
 
 # get a random char from s, ignoring ones we don't want
 def get_rand_char(s):
@@ -35,8 +89,13 @@ def get_rand_chars(s, n):
     return "".join(rand_chars)
 
 def get_rand_segments(s, n):
-    s = rm_newlines(s)
+    if np.random.random() > 0.90:
+        return get_rand_chars(s, n)
     
+    out = ""
+    while len(out) < n:
+        out += get_words(s)
+    return out[0:n]
 
 def insert_newlines(s, nchars):
     s = rm_newlines(s)
@@ -88,7 +147,7 @@ def unjarble(jarbled, unjarbled, n, count=0):
         return unjarble(partially_unjarbled, unjarbled, n, count+1)
     
 # ensure no whitespace at line ends and final line
-def pad(s, n_cols, break_i):
+def pad(s, n_cols, hexagram, break_i):
     out = []
     lines = get_lines(s)
     
@@ -97,20 +156,58 @@ def pad(s, n_cols, break_i):
         line_out = line
         # ignore line breaks between hexagram lines
         if i % break_i != 0:
-            if line[0] is " ":
+            # pad final hexagram line at beginning to preserve whatever text is the last text of all
+            if get_hexagram_line(i-1, hexagram, break_i, False) == 5.0:
+                final_line = rm_newlines(lines[-1])
+                n_excess_chars = n_cols - len(final_line)
+                line_out = get_rand_segments(s, n_excess_chars) + line_out
+            elif line[0] is " ":
                 line_out = rand_char + line[1:]
             elif line[-1] is " ":
                 line_out = line[0:-1] + rand_char
         out.append(line_out)
     
-    # final line no trailing whitespace
-    new_final_line = ""
-    for i in np.arange(n_cols - len(lines[-1])):
-        new_final_line += get_rand_char(s)
+    out1 = "\n".join(out)
+    out1 = rm_newlines(out1)
+    out1 = insert_newlines(out1, n_cols)
+    return out1
+
+def as_cave(s, n_cols, hexagram, break_i):
     
-    out[-1] += new_final_line
+    out = []
+    lines = get_lines(s)
     
-    return "\n".join(out)
+    for line, i in zip(lines, np.arange(len(lines))):
+        rand_char = get_rand_char(s)
+        line_out = line
+        # ignore line breaks between hexagram lines
+        if i % break_i != 0:
+            # pad final hexagram line at beginning to preserve whatever text is the last text of all
+            pls = [0.05, 0.075, 0.10, 1.0, 1.0, 0.90]
+            hexagram_line = get_hexagram_line(i-1, hexagram, break_i, True)
+            p = pls[hexagram_line]
+            line_out = ""
+            for ii in np.arange(len(line)):
+                if ii < len(line)/2:
+                    dist1 = ii / (len(line)/2)
+                else:
+                    dist1 = 1.0 - (ii - len(line)/2) / (len(line)/2)
+                dist2 = i * 1.20
+                if p < 1.0:
+                    p1 = p * dist1 * dist2
+                else:
+                    p1 = p
+                if np.random.random() < p1:
+                    line_out += line[ii]
+                else:
+                    line_out += " "
+        
+        out.append(line_out)
+    
+    out1 = "\n".join(out)
+    out1 = rm_newlines(out1)
+    out1 = insert_newlines(out1, n_cols)
+    return out1
 
 def ensure_num_rows(s, final_n_rows, n_cols):
     n_rows = len(get_lines(s))
@@ -119,13 +216,23 @@ def ensure_num_rows(s, final_n_rows, n_cols):
     return s[n_excess_chars:]
 
 def is_yang_line(i, hexagram, break_i):
-    hex_line = get_hexagram_line(i, break_i)
+    hex_line = get_hexagram_line(i, hexagram, break_i)
     return hexagram[hex_line]
 
-def get_hexagram_line(i, break_i):
-    return int(np.floor(i/break_i))
+def get_hexagram_line(i, hexagram, break_i, as_int=True):
+    
+    if hexagram is None:
+        return False
+    
+    if as_int:
+        return int(np.floor(i/break_i))
+    return i/break_i
     
 def to_hexagram(s, n_cols, vert_gap, break_i, hexagram):
+    
+    if hexagram is None:
+        return s
+    
     # every 7th line blank
     lines = get_lines(s)
     out = []
@@ -156,26 +263,6 @@ def to_hexagram(s, n_cols, vert_gap, break_i, hexagram):
     
     return "\n".join(out)
 
-# final text comprises final chars
-def append_txt(s, final):
-    offset = len(s) - len(final)
-    out = ""
-    for i in np.arange(len(s)):
-        ii = len(s) - i
-        doit = False
-        try:
-            # respect existing line breaks
-            doit = not (s[ii-1]+s[ii] == "\n") or (s[ii]+s[ii+1] == "\n")
-        except IndexError:
-            print('bad char i')
-        if doit:
-            if i < offset:
-                out += s[i]
-            else:
-                final_offset = i - offset
-                out += final[final_offset]
-    return out
-
 # finalize the shape into an appropriate shape
 def reshape(s, n_rows, n_cols, vert_gap, line_break, hexagram):
     # format lines
@@ -188,57 +275,6 @@ def reshape(s, n_rows, n_cols, vert_gap, line_break, hexagram):
     s1 = to_hexagram(s1, n_cols, vert_gap, line_break, hexagram)
 
     # format whitespace
-    s1 = pad(s1, n_cols, line_break)
+    s1 = pad(s1, n_cols, hexagram, line_break)
     
     return s1
-
-# draw with PIL
-def draw_pil_txt(s, size, title, font, font_color, font_size):
-    
-    image = Image.new("RGBA", size, (255,255,255))
-    draw = ImageDraw.Draw(image)
-    
-    wt, ht = draw.textsize(title, font)
-    wp, hp = draw.textsize(s, font)
-    
-    # title
-    draw.text(((size[0]-wt)/2, size[1]/2 - hp/2 - font_size*2), title, font=font, fill=font_color)
-    
-    # poem
-    draw.text(((size[0]-wp)/2, (size[1]-hp)/2), s, font=font, fill=font_color)
-    
-    return image
-
-# draw with Cairo
-def draw_cairo_txt(s, size, title, font, font_color, font_size):
-    
-    # setup a place to draw
-    surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, size[0], size[1])
-    ctx = cairo.Context (surface)
-
-    # paint background
-    ctx.set_source_rgb(1, 1, 1)
-    ctx.rectangle(0, 0, size[0], size[1])
-    ctx.fill()
-
-    # draw text
-    ctx.select_font_face(font)
-    ctx.set_font_size(font_size)
-    ctx.set_source_rgb(0,0,0)
-    
-    lines = get_lines(s)
-    
-    # title
-    xbearing, ybearing, width, height, xadvance, yadvance = ctx.text_extents(title)
-    ctx.move_to(size[0]/2 - width/2, size[1]/2 - (font_size*len(lines))/2 - font_size*2)
-    ctx.show_text(title)
-    
-    # we have to position each line individually :(
-    for line, i in zip(lines, np.arange(len(lines))):
-        xbearing, ybearing, width, height, xadvance, yadvance = ctx.text_extents(line)
-        print(line)
-        ctx.move_to(size[0]/2 - width/2, size[1]/2 - (font_size*len(lines))/2 + i * font_size)
-        ctx.show_text(line)
-
-    ctx.stroke()
-    return surface
