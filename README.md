@@ -1,7 +1,10 @@
 # ichinger
-Jarble a poem into an I Ching hexagram.
 
-Like so:
+## Jarble a poem into an I Ching hexagram.
+
+Simply run [ichinger.ipynb](./ichinger.ipynb).
+
+## Example I Ching'd poem
 
 ```
 sguided them into thehem into t  vcavscriptures only our fingers
